@@ -1,0 +1,96 @@
+#!/usr/local/bin/escript
+%%% -*- erlang -*-
+
+-compile(export_all).
+
+config_file() -> "./.colombo/config".
+
+get_repo(Repo) ->
+    Cmd = io_lib:format("git clone ~s", [Repo]),
+    io:format("Executing: ~s~n", [Cmd]),
+    os:cmd(Cmd).
+
+main(["init"]) ->
+    ConfigFile = config_file(),
+    filelib:ensure_dir(ConfigFile),
+    %% @todo add checking for existing config file.
+    {ok, File} = file:open(ConfigFile, [write]),
+    ok = file:close(File);
+main(["add-repo", Repo]) ->
+    ConfigFile = config_file(),
+    {ok, File} = file:open(ConfigFile, [append]),
+    %% @todo check for duplicates
+    ok = append_repo(File, Repo),
+    ok = file:close(File);
+main(["get-repos"]) ->
+    Repos = config_repos(),
+    io:format("get-repos with Repos=~p~n", [Repos]),
+    _ = [ get_repo(R)  || R <- Repos];
+main(["rebar-deps", RebarConfig]) ->
+    Repos = rebar_deps(RebarConfig),
+    [ io:format("~s~n", [Repo]) || Repo <- Repos ];
+main(["get-deps"]) ->
+    Deps = dependencies(),
+    io:format("Deps: ~p~n", [Deps]),
+    io:format("config_repos(): ~p~n", [config_repos()]),
+    case Deps -- config_repos() of
+        [] ->
+            ok;
+        Missing ->
+            io:format("Missing: ~p~n", [Missing]),
+            ConfigFile = config_file(),
+            {ok, File} = file:open(ConfigFile, [append]),
+            [ append_repo(File, Repo) || Repo <- Missing ],
+            ok = file:close(File),
+            main(["get-repos"]),
+            main(["get-deps"])
+    end.
+
+append_repo(File, Repo) ->
+    file:write(File, io_lib:format("{repo, \"~s\"}.~n", [Repo])).
+
+config_repos() ->
+    ConfigFile = config_file(),
+    {ok, Terms} = file:consult(ConfigFile),
+%%    io:format("config_repos Terms=~p~n", [Terms]),
+    [R || {repo,R} <- Terms].
+
+rebar_deps(RebarConfig) ->
+    {ok, Terms} = file:consult(RebarConfig),
+%%    io:format("rebar_deps Terms=~p~n", [Terms]),
+    RebarDeps = proplists:get_value(deps, Terms, []),
+    [Repo || {_, _, {git, Repo, _}} <- RebarDeps].
+
+
+repo_names() ->
+    RepoUrls = config_repos(),
+    [ repo_name(RepoUrl) || RepoUrl <- RepoUrls].
+
+repo_name(Url) ->
+    Last = lists:last(string:tokens(Url, "/")),
+    [RepoName | _ ] = string:tokens(Last, "."),
+    RepoName.
+    
+
+dependencies() ->
+    RepoNames = repo_names(),
+%%    io:format("RepoNames: ~p~n", [RepoNames]),
+    Sorted =
+        lists:sort(lists:flatten([dependencies(RepoName)
+                                  || RepoName <- RepoNames])),
+    [ Dep || {repo, Dep} <- Sorted ].
+
+dependencies(RepoName) ->
+    Repo = ("./" ++ RepoName ++ "/rebar.config"),
+%%    io:format("Repo: ~p~n", [Repo]),
+    RebarDeps = rebar_deps(Repo),
+    [ {repo, D} || D <- RebarDeps ].
+        
+    
+    
+
+
+
+    
+
+
