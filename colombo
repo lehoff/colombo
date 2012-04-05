@@ -115,11 +115,113 @@ dependencies(name) ->
     [ repo_name(Url) || Url <- Urls].
 
 app_dependencies(RepoName) ->
-    Repo = ("./" ++ RepoName ++ "/rebar.config"),
-%%    io:format("Repo: ~p~n", [Repo]),
-    RebarDeps = rebar_deps(Repo),
-    [ {repo, D} || D <- RebarDeps ].
-        
+    RepoPath = "./" ++ RepoName ++ "/",
+    RebarConfig =   (RepoPath  ++ "rebar.config"),
+    case filelib:is_file(RebarConfig) of
+        true ->
+            RebarDeps = rebar_deps(RebarConfig),
+            [ {repo, D} || D <- RebarDeps ];
+        false ->
+            AppFile = (RepoPath ++ "ebin/" ++ RepoName ++ ".app"),
+            AppSrcFile = (RepoPath ++ "src/" ++ RepoName ++ ".app.src"),
+            File =
+                case {file_lib:is_file(AppFile), file_lib:is_file(AppSrcFile)} of
+                    {true, true} ->
+                        io:format("ERROR: both .app and .app.src exists for ~s "
+                                  ++ "- please resolve this~n",
+                                  [RepoName]),
+                        exit(two_app_files);
+                    {true, false} ->
+                        AppFile;
+                    {false, true} ->
+                        AppSrcFile;
+                    {false, false} ->
+                        io:format("ERROR: neither .app or .app.src exists for ~s "
+                                  ++ "- please resolve this~n")
+                end,
+            case non_otp_dependencies(File) of
+                [] ->
+                    [];
+                Missing ->
+                    io:format("Missing the following applications: ~p - "
+                              ++ "please add repos for them.~n",
+                              [Missing]),
+                    exit(missing_repos)
+            end
+    end.
+
+
+non_otp_dependencies(AppFile) ->
+    {ok, Terms} = file:consult(AppFile),
+    Apps = proplists:get_value(applications, Terms, []) ++
+        proplists:get_vaule(included_applications, Terms, []),
+    Apps -- otp_apps().
+
+
+%% use
+%% ls /usr/local/lib/erlang/lib/ | sed 's/\(.*\)-.*/\1,/'
+%% to generate the list.
+otp_apps() ->
+    [appmon,
+     asn1,
+     common_test,
+     compiler,
+     cosEvent,
+     cosEventDomain,
+     cosFileTransfer,
+     cosNotification,
+     cosProperty,
+     cosTime,
+     cosTransactions,
+     crypto,
+     debugger,
+     dialyzer,
+     diameter,
+     edoc,
+     erl_docgen,
+     erl_interface,
+     erts,
+     et,
+     eunit,
+     gs,
+     hipe,
+     ic,
+     inets,
+     inviso,
+     jinterface,
+     kernel,
+     megaco,
+     mnesia,
+     observer,
+     odbc,
+     orber,
+     os_mon,
+     otp_mibs,
+     parsetools,
+     percept,
+     pman,
+     public_key,
+     reltool,
+     runtime_tools,
+     sasl,
+     snmp,
+     ssh,
+     ssl,
+     stdlib,
+     syntax_tools,
+     test_server,
+     toolbar,
+     tools,
+     tv,
+     typer,
+     webtool,
+     wx,
+     xmerl].
+    
+ 
+
+    
+            
 repo_map() ->
     Urls = config_repos(url),
     KVs = [ {repo_name(Url), Url} || Url <- Urls],
