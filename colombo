@@ -5,11 +5,30 @@
 
 config_file() -> "./.colombo/config".
 
-get_repo(Repo) ->
-    Cmd = io_lib:format("git clone ~s", [Repo]),
-    io:format("Executing: ~s~n", [Cmd]),
-    os:cmd(Cmd).
+get_repo(RepoUrl) ->
+    RepoName = repo_name(RepoUrl),
+    case filelib:is_dir(RepoName) of
+        false ->
+            Cmd = io_lib:format("git clone ~s", [RepoUrl]),
+            io:format("Executing: ~s~n", [Cmd]),
+            os:cmd(Cmd);
+        true ->
+            os:cmd("cd " ++ RepoName),
+            Cmd = "git pull",
+            io:format("Executing: ~s in ~s~n", [Cmd, RepoName]),
+            os:cmd(Cmd),
+            os:cmd("cd ..")
+    end.
 
+main(["show-config"]) ->
+    ConfigFile = config_file(),
+    case filelib:is_file(ConfigFile) of
+        true ->
+            {ok, Bin} = file:read_file(ConfigFile),
+            io:format("~s~n", [Bin]);
+        false ->
+            io:format("No config created - use 'colombo init' to create one~n", [])
+    end;
 main(["init"]) ->
     ConfigFile = config_file(),
     filelib:ensure_dir(ConfigFile),
@@ -17,31 +36,39 @@ main(["init"]) ->
     {ok, File} = file:open(ConfigFile, [write]),
     ok = file:close(File);
 main(["add-repo", Repo]) ->
-    ConfigFile = config_file(),
-    {ok, File} = file:open(ConfigFile, [append]),
-    %% @todo check for duplicates
-    ok = append_repo(File, Repo),
-    ok = file:close(File);
+    RepoMap = repo_map(),
+    RepoName = repo_name(Repo),
+    case lists:keyfind(Repo, 1, RepoMap) of
+        {Repo, ExistingUrl} ->
+            io:format("Application ~s is already added as ~s~n",
+                      [RepoName, ExistingUrl]);
+        false ->
+            ConfigFile = config_file(),
+            {ok, File} = file:open(ConfigFile, [append]),
+            ok = append_repo(File, Repo),
+            ok = file:close(File),
+            io:format("Added ~s~n", [Repo])
+    end;
 main(["get-repos"]) ->
-    Repos = config_repos(),
+    Repos = config_repos(url),
     io:format("get-repos with Repos=~p~n", [Repos]),
     _ = [ get_repo(R)  || R <- Repos];
 main(["rebar-deps", RebarConfig]) ->
     Repos = rebar_deps(RebarConfig),
     [ io:format("~s~n", [Repo]) || Repo <- Repos ];
 main(["get-deps"]) ->
-    Deps = dependencies(),
-    io:format("Deps: ~p~n", [Deps]),
-    io:format("config_repos(): ~p~n", [config_repos()]),
-    case Deps -- config_repos() of
+    io:format("preparing to resolve depedencies by doing 'get-repos'~n", []),
+    main(["get-repos"]),
+    DepMap = dependency_map(),
+    RepoMap = repo_map(),
+    Missing = orddict:fetch_keys(DepMap) -- orddict:fetch_keys(RepoMap),
+    case Missing of
         [] ->
             ok;
-        Missing ->
+        _ ->
             io:format("Missing: ~p~n", [Missing]),
-            ConfigFile = config_file(),
-            {ok, File} = file:open(ConfigFile, [append]),
-            [ append_repo(File, Repo) || Repo <- Missing ],
-            ok = file:close(File),
+            [ main(["add-repo", orddict:fetch(M, DepMap)])
+              || M <- Missing ],
             main(["get-repos"]),
             main(["get-deps"])
     end.
@@ -49,11 +76,15 @@ main(["get-deps"]) ->
 append_repo(File, Repo) ->
     file:write(File, io_lib:format("{repo, \"~s\"}.~n", [Repo])).
 
-config_repos() ->
+-spec config_repos('url'|'name') -> [string()].
+config_repos(url) ->
     ConfigFile = config_file(),
     {ok, Terms} = file:consult(ConfigFile),
-%%    io:format("config_repos Terms=~p~n", [Terms]),
-    [R || {repo,R} <- Terms].
+    %%    io:format("config_repos Terms=~p~n", [Terms]),
+    [R || {repo,R} <- Terms];
+config_repos(name) ->
+    Urls = config_repos(url),
+    [ repo_name(Url) || Url <- Urls].
 
 rebar_deps(RebarConfig) ->
     {ok, Terms} = file:consult(RebarConfig),
@@ -63,7 +94,7 @@ rebar_deps(RebarConfig) ->
 
 
 repo_names() ->
-    RepoUrls = config_repos(),
+    RepoUrls = config_repos(url),
     [ repo_name(RepoUrl) || RepoUrl <- RepoUrls].
 
 repo_name(Url) ->
@@ -71,24 +102,33 @@ repo_name(Url) ->
     [RepoName | _ ] = string:tokens(Last, "."),
     RepoName.
     
-
-dependencies() ->
+-spec dependencies('url'|'name') -> [string()].
+dependencies(url) ->
     RepoNames = repo_names(),
 %%    io:format("RepoNames: ~p~n", [RepoNames]),
     Sorted =
-        lists:sort(lists:flatten([dependencies(RepoName)
+        lists:sort(lists:flatten([app_dependencies(RepoName)
                                   || RepoName <- RepoNames])),
-    [ Dep || {repo, Dep} <- Sorted ].
+    [ Dep || {repo, Dep} <- Sorted ];
+dependencies(name) ->
+    Urls = dependencies(url),
+    [ repo_name(Url) || Url <- Urls].
 
-dependencies(RepoName) ->
+app_dependencies(RepoName) ->
     Repo = ("./" ++ RepoName ++ "/rebar.config"),
 %%    io:format("Repo: ~p~n", [Repo]),
     RebarDeps = rebar_deps(Repo),
     [ {repo, D} || D <- RebarDeps ].
         
+repo_map() ->
+    Urls = config_repos(url),
+    KVs = [ {repo_name(Url), Url} || Url <- Urls],
+    orddict:from_list(KVs).
     
-    
-
+dependency_map() ->
+    Urls = dependencies(url),
+    KVs = [ {repo_name(Url), Url} || Url <- Urls],
+    orddict:from_list(KVs).
 
 
     
