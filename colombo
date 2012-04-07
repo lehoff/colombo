@@ -35,13 +35,16 @@ main(["init"]) ->
     %% @todo add checking for existing config file.
     {ok, File} = file:open(ConfigFile, [write]),
     ok = file:close(File);
+main(["add-repo", "--force", _Repo]) ->
+    io:format("Not implemented yet.~n", []);
 main(["add-repo", Repo]) ->
     RepoMap = repo_map(),
     RepoName = repo_name(Repo),
     case lists:keyfind(RepoName, 1, RepoMap) of
         {RepoName, ExistingUrl} ->
             io:format("Application ~s is already added as ~s~n",
-                      [RepoName, ExistingUrl]);
+                      [RepoName, ExistingUrl]),
+            io:format("Use 'add-repo --force' to overwrite.~n", []);
         false ->
             ConfigFile = config_file(),
             {ok, File} = file:open(ConfigFile, [append]),
@@ -159,14 +162,18 @@ app_dependencies(RepoName) ->
                         io:format("ERROR: neither .app or .app.src exists for ~s "
                                   ++ "- please resolve this~n")
                 end,
-            case non_otp_dependencies(File) of
+            Needs = non_otp_dependencies(File),
+            NeedsStr = [ atom_to_list(A) || A <- Needs ],
+            Missing = NeedsStr -- config_repos(name),
+            case Missing of
                 [] ->
                     [];
-                Missing ->
+                _ ->
                     io:format("Missing the following applications: ~p - "
                               ++ "please add repos for them.~n",
                               [Missing]),
-                    [ atom_to_list(M) || M <- Missing ]
+                    Missing
+%%                    [ atom_to_list(M) || M <- Missing ]
             end
     end.
 
