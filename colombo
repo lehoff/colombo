@@ -38,8 +38,8 @@ main(["init"]) ->
 main(["add-repo", Repo]) ->
     RepoMap = repo_map(),
     RepoName = repo_name(Repo),
-    case lists:keyfind(Repo, 1, RepoMap) of
-        {Repo, ExistingUrl} ->
+    case lists:keyfind(RepoName, 1, RepoMap) of
+        {RepoName, ExistingUrl} ->
             io:format("Application ~s is already added as ~s~n",
                       [RepoName, ExistingUrl]);
         false ->
@@ -86,7 +86,12 @@ main(["app-deps", RepoName]) ->
                 end,
             DepStr = string:join(DepNames, ", "),
             io:format("~s depends on: ~s~n", [RepoName, DepStr])
-    end.
+    end;
+main(["list-repos"]) ->
+    RepoMap = repo_map(),
+    io:format("colombo has the following repos in its configuration:~n", []),
+    [ io:format("~s: ~s~n", [RepoName, RepoUrl])
+      || {RepoName, RepoUrl} <- RepoMap].
 
 append_repo(File, Repo) ->
     file:write(File, io_lib:format("{repo, \"~s\"}.~n", [Repo])).
@@ -165,6 +170,16 @@ app_dependencies(RepoName) ->
             end
     end.
 
+repo_map() ->
+    Urls = config_repos(url),
+    KVs = [ {repo_name(Url), Url} || Url <- Urls],
+    orddict:from_list(KVs).
+    
+dependency_map() ->
+    Urls = dependencies(url),
+    KVs = [ {repo_name(Url), Url} || Url <- Urls],
+    orddict:from_list(KVs).
+
 
 non_otp_dependencies(AppFile) ->
     {ok, [{application, _, Terms}]} = file:consult(AppFile),
@@ -237,15 +252,6 @@ otp_apps() ->
 
     
             
-repo_map() ->
-    Urls = config_repos(url),
-    KVs = [ {repo_name(Url), Url} || Url <- Urls],
-    orddict:from_list(KVs).
-    
-dependency_map() ->
-    Urls = dependencies(url),
-    KVs = [ {repo_name(Url), Url} || Url <- Urls],
-    orddict:from_list(KVs).
 
 
     
