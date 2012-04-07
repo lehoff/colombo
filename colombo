@@ -71,6 +71,21 @@ main(["get-deps"]) ->
               || M <- Missing ],
             main(["get-repos"]),
             main(["get-deps"])
+    end;
+main(["app-deps", RepoName]) ->
+    case app_dependencies(RepoName) of
+        [] ->
+            io:format("~s has no dependencies.~n", [RepoName]);
+        Repos ->
+            DepNames =
+                case [repo_name(Url) || {repo, Url} <- Repos] of
+                    [] ->
+                        Repos;
+                    List ->
+                        List
+                end,
+            DepStr = string:join(DepNames, ", "),
+            io:format("~s depends on: ~s~n", [RepoName, DepStr])
     end.
 
 append_repo(File, Repo) ->
@@ -125,7 +140,7 @@ app_dependencies(RepoName) ->
             AppFile = (RepoPath ++ "ebin/" ++ RepoName ++ ".app"),
             AppSrcFile = (RepoPath ++ "src/" ++ RepoName ++ ".app.src"),
             File =
-                case {file_lib:is_file(AppFile), file_lib:is_file(AppSrcFile)} of
+                case {filelib:is_file(AppFile), filelib:is_file(AppSrcFile)} of
                     {true, true} ->
                         io:format("ERROR: both .app and .app.src exists for ~s "
                                   ++ "- please resolve this~n",
@@ -146,15 +161,15 @@ app_dependencies(RepoName) ->
                     io:format("Missing the following applications: ~p - "
                               ++ "please add repos for them.~n",
                               [Missing]),
-                    exit(missing_repos)
+                    [ atom_to_list(M) || M <- Missing ]
             end
     end.
 
 
 non_otp_dependencies(AppFile) ->
-    {ok, Terms} = file:consult(AppFile),
+    {ok, [{application, _, Terms}]} = file:consult(AppFile),
     Apps = proplists:get_value(applications, Terms, []) ++
-        proplists:get_vaule(included_applications, Terms, []),
+        proplists:get_value(included_applications, Terms, []),
     Apps -- otp_apps().
 
 
