@@ -13,12 +13,21 @@ get_repo(RepoUrl) ->
             io:format("Executing: ~s~n", [Cmd]),
             os:cmd(Cmd);
         true ->
-            os:cmd("cd " ++ RepoName),
+            Cwd = cd1(RepoName),
             Cmd = "git pull",
-            io:format("Executing: ~s in ~s~n", [Cmd, RepoName]),
+            io:format("Executing: ~s in ~s~n", [Cmd, Cwd ++ "/" ++ RepoName]),%%RepoName]),
             os:cmd(Cmd),
-            os:cmd("cd ..")
+            ok = file:set_cwd(Cwd)
     end.
+
+cd1(Dir) ->
+    {ok, Cwd} = file:get_cwd(),
+    SubDir = (Cwd ++ "/" ++ Dir),
+    ok = file:set_cwd(SubDir),
+    Cwd.
+
+
+
 
 main(["show-config"]) ->
     ConfigFile = config_file(),
@@ -35,8 +44,11 @@ main(["init"]) ->
     %% @todo add checking for existing config file.
     {ok, File} = file:open(ConfigFile, [write]),
     ok = file:close(File);
-main(["add-repo", "--force", _Repo]) ->
-    io:format("Not implemented yet.~n", []);
+main(["add-repo", "--force", Repo]) ->
+    RepoName = repo_name(Repo),
+    ok = delete_dir(RepoName),
+    remove_repo_from_config(RepoName),
+    main(["add-repo", Repo]);
 main(["add-repo", Repo]) ->
     RepoMap = repo_map(),
     RepoName = repo_name(Repo),
@@ -52,6 +64,10 @@ main(["add-repo", Repo]) ->
             ok = file:close(File),
             io:format("Added ~s~n", [Repo])
     end;
+main(["delete-repo", RepoName]) ->
+    ok = delete_dir(RepoName),
+    ok = remove_repo_from_config(RepoName),
+    io:format("Removed ~s from config~n", [RepoName]);
 main(["get-repos"]) ->
     Repos = config_repos(url),
     io:format("get-repos with Repos=~p~n", [Repos]),
@@ -97,17 +113,25 @@ main(["list-repos"]) ->
       || {RepoName, RepoUrl} <- RepoMap].
 
 append_repo(File, Repo) ->
+    %% @todo rewrite this to use write_term_to_file
     file:write(File, io_lib:format("{repo, \"~s\"}.~n", [Repo])).
+
+write_term_to_file(File, Term) ->
+    file:write(File, io_lib:format("~p.~n", [Term])).
 
 -spec config_repos('url'|'name') -> [string()].
 config_repos(url) ->
-    ConfigFile = config_file(),
-    {ok, Terms} = file:consult(ConfigFile),
+    Terms = config_terms(),
     %%    io:format("config_repos Terms=~p~n", [Terms]),
     [R || {repo,R} <- Terms];
 config_repos(name) ->
     Urls = config_repos(url),
     [ repo_name(Url) || Url <- Urls].
+
+config_terms() ->
+    ConfigFile = config_file(),
+    {ok, Terms} = file:consult(ConfigFile),
+    Terms.
 
 rebar_deps(RebarConfig) ->
     {ok, Terms} = file:consult(RebarConfig),
@@ -194,6 +218,42 @@ non_otp_dependencies(AppFile) ->
         proplists:get_value(included_applications, Terms, []),
     Apps -- otp_apps().
 
+
+delete_dir(Dir) ->
+    case filelib:is_dir(Dir) of
+        false ->
+            ok;
+        true ->
+            Cwd = cd1(Dir),
+            {ok, Contents} = file:list_dir("."),
+            {Dirs, Files} = lists:partition( fun filelib:is_dir/1, Contents),
+            _DeleteRes = [ file:delete(File) || File <- Files],
+            [ delete_dir(D) || D <- Dirs],
+            ok = file:set_cwd(Cwd),
+            ok = file:del_dir(Dir),
+            ok
+    end.
+
+remove_repo_from_config(RepoName) ->
+    Terms = config_terms(),
+%%    io:format("Existing config terms: ~p~n", [Terms]),
+    NewTerms = lists:filter( fun(Term) -> not repo_spec_for_repo_name(Term, RepoName) end,
+                             Terms),
+%%    io:format("New config terms: ~p~n", [NewTerms]),
+    ConfigFile = config_file(),
+    {ok, File} = file:open(ConfigFile, [write]),
+    lists:foreach( fun (Term) -> write_term_to_file(File, Term) end,
+                   NewTerms),
+    ok = file:close(File),
+    %% AfterWrite = config_terms(),
+    %% io:format("AfterWrite: ~p~n", [AfterWrite]),
+    ok.
+
+
+repo_spec_for_repo_name({repo, RepoUrl}, RepoName) ->
+    repo_name(RepoUrl) == RepoName;
+repo_spec_for_repo_name(_, _) ->
+    false.
 
 %% use
 %% ls /usr/local/lib/erlang/lib/ | sed 's/\(.*\)-.*/\1,/'
