@@ -5,6 +5,11 @@
 
 config_file() -> "./.colombo/config".
 
+lib_dir() ->
+    {ok, Cwd} = file:get_cwd(),
+    Cwd ++ "/lib".
+    
+
 get_repo(RepoUrl) ->
     RepoName = repo_name(RepoUrl),
     case filelib:is_dir(RepoName) of
@@ -110,7 +115,65 @@ main(["list-repos"]) ->
     RepoMap = repo_map(),
     io:format("colombo has the following repos in its configuration:~n", []),
     [ io:format("~s: ~s~n", [RepoName, RepoUrl])
-      || {RepoName, RepoUrl} <- RepoMap].
+      || {RepoName, RepoUrl} <- RepoMap];
+%% main(["set-erllibs", Dir]) ->
+%%     ErllibsDir = {erl_libs, Dir},
+%%     ConfigFile = config_file(),
+%%     {ok, Terms} = file:consult(ConfigFile),
+%%     NewTerms = lists:keystore(erl_libs, 1, Terms, ErllibsDir),
+%%     {ok, File} = file:open(ConfigFile, [write]),
+%%     ok =write_terms(File, NewTerms),
+%%     io:format("changed erl_libs to ~p~n", [Dir]);
+main(["install", RepoName]) ->
+    %% @todo find non-Unix OS way of doing this
+    {ok, Cwd} = file:get_cwd(),
+    SrcDir = string:join([Cwd, RepoName, 
+                          "_build", RepoName,
+                          "lib", RepoName ++ "*"],
+                         "/"),
+    LibDir = lib_dir(),
+    Cmd = io_lib:format("cp -r ~s ~s", [SrcDir, LibDir]),
+    os:cmd(Cmd),
+    io:format("Installed ~s in ~s~n", [RepoName, LibDir]);
+main(["install-rebar", RepoName]) ->
+    %% @todo find non-Unix OS way of doing this
+    {ok, Cwd} = file:get_cwd(),
+    SrcDir = string:join([Cwd, RepoName],
+                         "/"),
+    LibDir = lib_dir(),
+    Cmd = io_lib:format("cp -r ~s ~s", [SrcDir, LibDir]),
+    os:cmd(Cmd),
+    io:format("Installed rebar based project ~s in ~s~n", [RepoName, LibDir]);    
+main(["build", RepoName]) ->
+    Cwd = cd1(RepoName),
+    Cmd = "sinan build",
+    io:format("Executing '~s' for ~s~n", [Cmd, RepoName]),
+    os:cmd(Cmd),
+    ok = file:set_cwd(Cwd);
+main(["build-all"]) ->
+    RepoNames = repo_names(),
+    [ main(["build", RepoName]) || RepoName <- RepoNames ],
+    io:format("done with 'build-all'~n", []);
+main(["create-emakefile", RepoName]) ->
+    ok = create_emakefile(RepoName).
+    
+    
+
+
+create_emakefile(RepoName) ->
+    Cwd = cd1(RepoName),
+    case filelib:is_regular("Emakefile") of
+        true ->
+            io:format("Emakefile already in place.~n");
+        false ->
+            Rule = {'src/*', [{outdir, "ebin"},{i, "include"}, {i, "src"}]},
+            io:format("Creating Emakefile for ~s~n", [RepoName]),
+            {ok, File} = file:open("Emakefile", [write]),
+            write_term_to_file(File, Rule),
+            ok = file:close(File)
+    end,
+    ok = file:set_cwd(Cwd).
+
 
 append_repo(File, Repo) ->
     %% @todo rewrite this to use write_term_to_file
@@ -242,12 +305,15 @@ remove_repo_from_config(RepoName) ->
 %%    io:format("New config terms: ~p~n", [NewTerms]),
     ConfigFile = config_file(),
     {ok, File} = file:open(ConfigFile, [write]),
-    lists:foreach( fun (Term) -> write_term_to_file(File, Term) end,
-                   NewTerms),
+    write_terms(File, NewTerms),
     ok = file:close(File),
     %% AfterWrite = config_terms(),
     %% io:format("AfterWrite: ~p~n", [AfterWrite]),
     ok.
+
+write_terms(File, NewTerms) ->
+    lists:foreach(fun (Term) -> write_term_to_file(File, Term) end,
+                  NewTerms).
 
 
 repo_spec_for_repo_name({repo, RepoUrl}, RepoName) ->
