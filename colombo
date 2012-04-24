@@ -141,15 +141,21 @@ main(["install-otp", RepoName]) ->
     SrcDir = string:join([Cwd, RepoName],
                          "/"),
     LibDir = lib_dir(),
+    ensure_dir(LibDir),
     Vsn = extract_version(RepoName),
-    Cmd = io_lib:format("cp -r ~s ~s/~s-~s",
-                        [SrcDir, LibDir, RepoName, Vsn]),
-    os:cmd(Cmd),
+    Target = io_lib:format("~s/~s-~s", [LibDir, RepoName, Vsn]),
+    ok = ensure_dir(Target),
+    io:format("Created target ~s~n", [Target]),
+    Cmds = [ io_lib:format("cp -r ~s/~s ~s/~s",
+                           [SrcDir, SubDir, Target, SubDir])
+             || SubDir <- ["ebin", "include", "src"]
+           ],
+    [ os:cmd(Cmd) || Cmd <- Cmds ],
     io:format("Installed OTP project ~s in ~s~n", [RepoName, LibDir]);    
 main(["build", RepoName]) ->
     create_emakefile(RepoName),
     Cwd = cd1(RepoName),
-    filelib:ensure_dir("ebin"),
+    ensure_dir("ebin"),
     Cmd = "erl -make",
     io:format("Executing '~s' for ~s~n", [Cmd, RepoName]),
     os:cmd(Cmd),
@@ -163,7 +169,15 @@ main(["create-emakefile", RepoName]) ->
 main(["version", RepoName]) ->
     io:format("~s is at version ~p~n", [RepoName, extract_version(RepoName)]).
     
-    
+
+ensure_dir(Dir) ->
+    case filelib:is_dir(Dir) of
+        true ->
+            ok;
+        false ->
+            ok = file:make_dir(Dir)
+    end.
+
 -spec extract_version(RepoName::string()) -> string().
 extract_version(RepoName) ->
     AppFile = find_app_file(RepoName),
