@@ -100,6 +100,14 @@ main(["delete-repo", RepoName]) ->
     ok = delete_dir(RepoName),
     ok = remove_repo_from_config(RepoName),
     io:format("Removed ~s from config~n", [RepoName]);
+main(["get-repo", RepoName]) ->
+    RepoMap = repo_map(),
+    case proplists:get_value(RepoName, RepoMap) of
+        RepoURL ->
+            get_repo(RepoURL);
+        undefined ->
+            io:format("'get-repo' for unknown repao ~s~n", [RepoName])
+    end;
 main(["get-repos"]) ->
     Repos = config_repos(url),
     io:format("get-repos with Repos=~p~n", [Repos]),
@@ -397,10 +405,13 @@ remove_repo_from_config(RepoName) ->
 %%    io:format("Existing config terms: ~p~n", [Terms]),
     NewTerms = lists:filter( fun(Term) -> not repo_spec_for_repo_name(Term, RepoName) end,
                              Terms),
-%%    io:format("New config terms: ~p~n", [NewTerms]),
+    %%    io:format("New config terms: ~p~n", [NewTerms]),
+    SelectList = proplists:get_value(select, NewTerms, []),
+    NewSelectList = lists:keydelete(RepoName, 1, SelectList),
+    NewTerms2 = lists:keystore(select, 1, NewTerms, {select, NewSelectList}),
     ConfigFile = config_file(),
     {ok, File} = file:open(ConfigFile, [write]),
-    write_terms(File, NewTerms),
+    write_terms(File, NewTerms2),
     ok = file:close(File),
     %% AfterWrite = config_terms(),
     %% io:format("AfterWrite: ~p~n", [AfterWrite]),
