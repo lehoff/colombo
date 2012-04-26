@@ -69,6 +69,33 @@ main(["add-repo", Repo]) ->
             ok = file:close(File),
             io:format("Added ~s~n", [Repo])
     end;
+main(["select", RepoName, "tag", Tag]) ->
+    Terms = config_terms(),
+    {Select, BaseTerms} = lists:partition( fun({select,_}) -> true;
+                                                (_) -> false
+                                             end,
+                                             Terms),
+    SelectList = proplists:get_value(select, Select, []),
+    NewSelectList = lists:keystore(RepoName, 1, SelectList, {RepoName, {tag, Tag}}),
+    NewTerms = [{select,NewSelectList} | BaseTerms],
+    ConfigFile = config_file(),
+    {ok, File} = file:open(ConfigFile, [write]),
+    write_terms(File, NewTerms),
+    ok = file:close(File),
+    io:format("Changed ~s to use {tag, ~s}~n",
+              [RepoName, Tag]);
+main(["checkout"]) ->
+    Terms = config_terms(),
+    SelectList = proplists:get_value(select, Terms, []),
+    [ checkout_repo(RepoName, Selection) ||
+        {RepoName, Selection} <- SelectList],
+    io:format("checkout completed~n", []);
+main(["checkout", RepoName]) ->
+    Terms = config_terms(),
+    SelectList = proplists:get_value(select, Terms, []),
+    Selection = proplists:get_value(RepoName, SelectList, {branch, "master"}),  
+    ok = checkout_repo(RepoName, Selection),
+    io:format("checkout ~p for ~s completed~n", [Selection, RepoName]);
 main(["delete-repo", RepoName]) ->
     ok = delete_dir(RepoName),
     ok = remove_repo_from_config(RepoName),
@@ -135,6 +162,10 @@ main(["install-sinan", RepoName]) ->
     Cmd = io_lib:format("cp -r ~s ~s", [SrcDir, LibDir]),
     os:cmd(Cmd),
     io:format("Installed ~s in ~s~n", [RepoName, LibDir]);
+main(["install-otp", "--all"]) ->
+    RepoNames = repo_names(),
+    [ main (["install-otp", RepoName]) || RepoName <- RepoNames ],
+    io:format("done with 'install-otp-all'~n", []);
 main(["install-otp", RepoName]) ->
     %% @todo find non-Unix OS way of doing this
     {ok, Cwd} = file:get_cwd(),
@@ -151,8 +182,10 @@ main(["install-otp", RepoName]) ->
              || SubDir <- ["ebin", "include", "src"]
            ],
     [ os:cmd(Cmd) || Cmd <- Cmds ],
-    io:format("Installed OTP project ~s in ~s~n", [RepoName, LibDir]);    
+    io:format("Installed OTP project ~s in ~s~n", [RepoName, LibDir]);
 main(["build", RepoName]) ->
+    io:format("Preparing build by doing checkout for ~s~n", [RepoName]),
+    main(["checkout", RepoName]),
     create_emakefile(RepoName),
     Cwd = cd1(RepoName),
     ensure_dir("ebin"),
@@ -168,7 +201,24 @@ main(["create-emakefile", RepoName]) ->
     ok = create_emakefile(RepoName);
 main(["version", RepoName]) ->
     io:format("~s is at version ~p~n", [RepoName, extract_version(RepoName)]).
+%% main(["pick", RepoName, "tag", Tag]) ->
+%%     Cwd = cd1(RepoName),
+%%     Cmd = "git checkout " ++ Tag
+        
+%%     ok = file:set_cwd(Cwd).
     
+
+checkout_repo(RepoName, {tag, Tag}) ->
+    checkout_raw(RepoName, Tag);
+checkout_repo(RepoName, {branch, Branch}) ->
+    checkout_raw(RepoName, Branch).
+
+checkout_raw(RepoName, Tag) ->
+    Cwd = cd1(RepoName),
+    Cmd = "git checkout " ++ Tag,
+    os:cmd(Cmd),
+    io:format("Executed '~s' in ~s~n", [Cmd, RepoName]),
+    ok = file:set_cwd(Cwd).
 
 ensure_dir(Dir) ->
     case filelib:is_dir(Dir) of
